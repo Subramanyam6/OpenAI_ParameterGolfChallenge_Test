@@ -127,7 +127,7 @@ class CausalSelfAttention(nn.Module):
         w = (q @ k.transpose(-2, -1)) * (dh ** -0.5)   # [B,H,T,T]
         causal = torch.tril(torch.ones(T, T, device=x.device, dtype=torch.bool))
         w      = w.masked_fill(~causal, float('-inf'))
-        w      = F.softmax(w.float(), dim=-1).to(x.dtype)   # fp32 softmax → cast back
+        w      = F.softmax(w, dim=-1)   # bf16 softmax: 2x less VRAM, fine for T=1024
 
         out = w @ v                                          # [B,H,T,dh]
 
