@@ -519,7 +519,7 @@ def train():
     opt_adam  = torch.optim.AdamW(adam_p, lr=args.adam_lr, betas=(0.9, 0.95), weight_decay=0.0)
 
     ema   = EMA(base, args.ema_decay)
-    accum = max(1, args.batch_tokens // (ws * args.seq_len * 8))
+    accum = max(1, args.batch_tokens // (ws * args.seq_len * 96))
     log0(f"grad_accum={accum}  effective_batch={args.batch_tokens:,} tokens")
 
     t0 = time.time()
