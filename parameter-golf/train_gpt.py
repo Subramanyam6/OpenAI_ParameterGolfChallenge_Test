@@ -106,6 +106,7 @@ class CausalSelfAttention(nn.Module):
         self.d_head  = d // n_heads
         self.qkv     = nn.Linear(d, 3 * d, bias=False)
         self.proj    = nn.Linear(d, d, bias=False)
+        self.q_gain  = nn.Parameter(torch.full((n_heads,), 4.0, dtype=torch.float32))
         nn.init.zeros_(self.proj.weight)   # zero-init residual path
 
     def forward(self, x: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor):
@@ -117,7 +118,10 @@ class CausalSelfAttention(nn.Module):
         k = k.view(B, T, H, dh).transpose(1, 2)
         v = v.view(B, T, H, dh).transpose(1, 2)
 
+        q = F.rms_norm(q, (q.size(-1),))
+        k = F.rms_norm(k, (k.size(-1),))
         q, k = apply_rope(q, k, cos, sin)
+        q = q * self.q_gain.to(dtype=q.dtype)[None, :, None, None]
 
         # Explicit attention weights (needed to extract diagonal for XSA)
         w = (q @ k.transpose(-2, -1)) * (dh ** -0.5)   # [B,H,T,T]
@@ -229,6 +233,7 @@ class GPT(nn.Module):
         self.norm_f  = RMSNorm(D)
         self.lm_head = nn.Linear(D, V, bias=False)
         self.lm_head.weight = self.embed.weight              # tied embeddings → -1MB artifact
+        self.slot    = nn.Parameter(torch.zeros(1, 1, D))
         self.bigram  = BigramSystem(V, args.bigram_buckets, args.bigram_dim)
 
         # RoPE cache — persistent=False: recomputed, not saved to model.bin
@@ -262,6 +267,7 @@ class GPT(nn.Module):
         h = self.embed(x)
         for blk in self.blocks:
             h = blk(h, cos, sin)
+        h      = h + self.slot
         h      = self.norm_f(h)
         logits = self.lm_head(h) + bigram_logits             # [B,T,V]
 
@@ -506,8 +512,8 @@ def train():
 
     # Optimizer split: Muon for 2D weights (excluding tied embedding), AdamW for rest
     tied      = base.embed.weight
-    muon_p    = [p for p in base.parameters() if p.requires_grad and p.ndim >= 2 and p is not tied]
-    adam_p    = [p for p in base.parameters() if p.requires_grad and (p.ndim < 2 or p is tied)]
+    muon_p    = [p for p in base.parameters() if p.requires_grad and p.ndim == 2 and p is not tied]
+    adam_p    = [p for p in base.parameters() if p.requires_grad and (p.ndim != 2 or p is tied)]
     opt_muon  = Muon(muon_p, lr=args.muon_lr, wd=args.weight_decay)
     opt_adam  = torch.optim.AdamW(adam_p, lr=args.adam_lr, betas=(0.9, 0.95), weight_decay=0.0)
 
@@ -565,14 +571,314 @@ def train():
                  f"[random baseline {math.log2(args.vocab_size)/args.bytes_per_token:.3f}  "
                  f"target <1.115]")
 
+    
+    # Collect saliency BEFORE DDP teardown — optimizer state is still live.
+    # AdamW v_t (exp_avg_sq) accumulates grad² over the entire run: best signal.
+    log0("Collecting optimizer saliency for GPTQ ...")
+    saliency = _collect_saliency(opt_adam, opt_muon, base)
+
+    # Barrier: ensure all ranks finish training before rank 0 starts GPTQ.
+    if ddp:
+        dist.barrier()
+
     if rank == 0:
         orig = ema.apply_to(base)
-        torch.save(base.state_dict(), 'model.bin')
-        log0(f"Saved model.bin  (total: {time.time()-t0:.0f}s)")
+        log0("Saving quantized model.bin ...")
+        save_quantized_model(base, dev, "model.bin", t0, saliency=saliency)
         ema.restore(base, orig)
 
     if ddp:
         dist.destroy_process_group()
+
+
+# ─── GPTQ Int6 + AR Self-Gen Calibration ──────────────────────────────────────
+
+def _collect_saliency(opt_adam: torch.optim.AdamW,
+                      opt_muon,
+                      model: nn.Module) -> dict:
+    """
+    Extract per-parameter saliency from optimizer state.
+
+    AdamW params  → exp_avg_sq = v_t = EMA of grad²  (Fisher diagonal approx).
+                    Accumulated over the ENTIRE training run — low-noise,
+                    reflects which weights actually drove the loss signal.
+    Muon params   → |momentum buf|  (integrated gradient direction over training).
+
+    Returns: {param_name: CPU float32 saliency tensor, same shape as weight}
+    """
+    saliency: dict = {}
+    id_to_name = {id(p): n for n, p in model.named_parameters()}
+
+    for p, state in opt_adam.state.items():
+        if 'exp_avg_sq' in state:
+            name = id_to_name.get(id(p))
+            if name:
+                saliency[name] = state['exp_avg_sq'].detach().float().cpu()
+
+    for p, state in opt_muon.state.items():
+        if 'buf' in state:
+            name = id_to_name.get(id(p))
+            if name and name not in saliency:
+                saliency[name] = state['buf'].abs().detach().float().cpu()
+
+    log0(f"  [saliency] collected for {len(saliency)} parameters.")
+    return saliency
+
+
+def _ar_generate_calibration(model: nn.Module, device: torch.device,
+                              num_seqs: int = 32, seq_len: int = 1024,
+                              temperature: float = 0.8, seed: int = 42):
+    """
+    Autoregressively generate calibration sequences from the EMA model.
+    No external data — fully self-contained.
+    Returns list of [1, seq_len] int64 tensors.
+    """
+    model.eval()
+    rng = torch.Generator(device=device)
+    rng.manual_seed(seed)
+    seqs = []
+    ctx = (torch.autocast('cuda', torch.bfloat16)
+           if device.type == 'cuda' else torch.autocast('cpu', torch.bfloat16))
+    batch_size = 8
+    with torch.inference_mode(), ctx:
+        for start in range(0, num_seqs, batch_size):
+            bs = min(batch_size, num_seqs - start)
+            tokens = torch.randint(0, args.vocab_size, (bs, 1), device=device, generator=rng)
+            for _ in range(seq_len - 1):
+                logits   = model(tokens)[:, -1, :]          # [bs, V]
+                probs    = torch.softmax(logits / temperature, dim=-1)
+                next_tok = torch.multinomial(probs, 1, generator=rng)
+                tokens   = torch.cat([tokens, next_tok], dim=1)
+            for i in range(bs):
+                seqs.append(tokens[i:i+1].clone())
+    return seqs
+
+
+def _collect_hessians(model: nn.Module, seqs, device: torch.device):
+    """
+    Collect H = X^T X for every nn.Linear layer via forward hooks.
+    Works with our GPT model (all linear layers are nn.Linear, not CastedLinear).
+    """
+    hessians: dict = {}
+    hooks    = []
+
+    for name, mod in model.named_modules():
+        if isinstance(mod, nn.Linear):
+            cols = mod.weight.shape[1]
+            H    = torch.zeros(cols, cols, dtype=torch.float32)
+            hessians[name] = H
+
+            def make_hook(h_ref):
+                def hook(m, inp, out):
+                    x = inp[0].detach().float()
+                    x = x.reshape(-1, x.shape[-1])
+                    h_ref.add_((x.T @ x).cpu())
+                return hook
+            hooks.append(mod.register_forward_hook(make_hook(H)))
+
+    model.eval()
+    ctx = (torch.autocast('cuda', torch.bfloat16)
+           if device.type == 'cuda' else torch.autocast('cpu', torch.bfloat16))
+    with torch.inference_mode(), ctx:
+        for seq in seqs:
+            x = seq[:, :-1].to(device)
+            model(x)
+
+    for h in hooks:
+        h.remove()
+
+    n = len(seqs)
+    for name in hessians:
+        H    = hessians[name] / max(n, 1)
+        damp = 0.01 * H.diagonal().mean().clamp_min(1e-6)
+        H.diagonal().add_(damp)
+        hessians[name] = H
+    return hessians
+
+
+def _gptq_quantize_weight(W: torch.Tensor, H: torch.Tensor,
+                           clip_range: int = 31, block_size: int = 128,
+                           saliency: torch.Tensor = None):
+    """
+    GPTQ int6 quantization: Hessian-guided column-wise error compensation.
+    W:        [rows, cols] float32
+    H:        [cols, cols] float32 Hessian (X^T X + damping)
+    saliency: [rows, cols] float32 per-weight importance (AdamW v_t or Muon buf).
+              Boosts the Hessian diagonal for columns connected to high-gradient
+              features, protecting their precision during int6 compression.
+    Returns: (Q: int8 with values in [-31,31], scale: float16 per-row)
+    """
+    rows, cols = W.shape
+    H     = H.clone()
+
+    # AdamW v_t saliency boost: columns with high accumulated gradient²
+    # get higher apparent Hessian sensitivity → GPTQ protects them more.
+    if saliency is not None and saliency.shape == (rows, cols):
+        col_sal = saliency.mean(dim=0).float()             # [cols] per-column importance
+        col_sal = col_sal / col_sal.mean().clamp_min(1e-8) # normalise to mean=1
+        H.diagonal().add_(0.1 * col_sal * H.diagonal().mean())
+
+    dead  = H.diagonal() == 0
+    H[dead.nonzero(as_tuple=True)[0], dead.nonzero(as_tuple=True)[0]] = 1.0
+
+    perm     = torch.argsort(H.diagonal(), descending=True)
+    inv_perm = torch.argsort(perm)
+    Wp       = W[:, perm].clone()
+    Wp[:, dead[perm]] = 0.0
+
+    Hp = H[perm][:, perm]
+    try:
+        Hinv = torch.linalg.cholesky(Hp)
+        Hinv = torch.cholesky_inverse(Hinv)
+        Hinv = torch.linalg.cholesky(Hinv, upper=True)
+    except torch.linalg.LinAlgError:
+        # Ill-conditioned Hessian — fall back to percentile quantization.
+        return _percentile_quantize_weight(W, clip_range)
+
+    best_q, best_s, best_err = None, None, float('inf')
+    for pct in [0.9990, 0.9995, 0.9999, 1.0]:
+        row_clip = (torch.quantile(W.abs(), pct, dim=1)
+                    if pct < 1.0 else W.abs().amax(dim=1))
+        sf  = (row_clip / clip_range).clamp_min(1.0 / clip_range)
+        Q   = torch.zeros_like(Wp, dtype=torch.int8)
+        Ww  = Wp.clone()
+        for i1 in range(0, cols, block_size):
+            i2     = min(i1 + block_size, cols)
+            cnt    = i2 - i1
+            W1     = Ww[:, i1:i2].clone()
+            Q1     = torch.zeros(rows, cnt, dtype=torch.int8)
+            Err1   = torch.zeros(rows, cnt)
+            Hi1    = Hinv[i1:i2, i1:i2]
+            for i in range(cnt):
+                w       = W1[:, i]
+                d       = Hi1[i, i]
+                q       = torch.clamp(torch.round(w / sf), -clip_range, clip_range).to(torch.int8)
+                Q1[:, i] = q
+                err     = (w - q.float() * sf) / d
+                W1[:, i:] -= err.unsqueeze(1) * Hi1[i, i:].unsqueeze(0)
+                Err1[:, i] = err
+            Q[:, i1:i2] = Q1
+            if i2 < cols:
+                Ww[:, i2:] -= Err1 @ Hinv[i1:i2, i2:]
+        recon = Q.float() * sf[:, None]
+        err   = (Wp - recon).pow(2).mean().item()
+        if err < best_err:
+            best_q, best_s, best_err = Q, sf.to(torch.float16), err
+
+    best_q = best_q[:, inv_perm]
+    return best_q, best_s
+
+
+def _percentile_quantize_weight(W: torch.Tensor, clip_range: int = 31):
+    """Per-row percentile int6 quantization (fallback for 1-D or small tensors)."""
+    t32 = W.float()
+    if t32.ndim == 2:
+        best_q, best_s, best_err = None, None, float('inf')
+        for pct in [0.9990, 0.9995, 0.9999, 1.0]:
+            row_clip = (torch.quantile(t32.abs(), pct, dim=1)
+                        if pct < 1.0 else t32.abs().amax(dim=1))
+            s  = (row_clip / clip_range).clamp_min(1.0 / clip_range).to(torch.float16)
+            q  = torch.clamp(torch.round(t32 / s.float()[:, None]),
+                             -clip_range, clip_range).to(torch.int8)
+            err = (t32 - q.float() * s.float()[:, None]).pow(2).mean().item()
+            if err < best_err:
+                best_q, best_s, best_err = q, s, err
+        return best_q, best_s
+    amax  = t32.abs().max().item()
+    scale = torch.tensor(amax / clip_range if amax > 0 else 1.0, dtype=torch.float16)
+    q     = torch.clamp(torch.round(t32 / scale.float()), -clip_range, clip_range).to(torch.int8)
+    return q, scale
+
+
+def save_quantized_model(model: nn.Module, device: torch.device,
+                          path: str = "model.bin", t0: float = 0.0,
+                          saliency: dict = None):
+    """
+    End-to-end GPTQ int6 quantization + compression → model.bin.
+
+    Pipeline:
+      1. AR self-gen calibration (32 seqs × 1024 tokens) — no external data
+      2. Collect Hessians via nn.Linear forward hooks
+      3. GPTQ int6 for 2D weights ≥ 4096 elements, with optional AdamW v_t
+         saliency boosting of the Hessian diagonal (novel contribution)
+      4. Percentile int6 fallback for 1-D / small tensors
+      5. Non-float tensors kept as float16
+      6. torch.save + zstd-22 (preferred) or lzma-9 (stdlib fallback)
+    """
+    import io
+
+    log0("  [quant] generating AR calibration sequences ...")
+    seqs = _ar_generate_calibration(model, device, num_seqs=32,
+                                    seq_len=args.seq_len, seed=args.seed)
+
+    log0("  [quant] collecting Hessians ...")
+    hessians = _collect_hessians(model, seqs, device)
+
+    log0("  [quant] quantizing to int6 (AdamW-v_t saliency boost) ...")
+    quant: dict = {}
+    meta:  dict = {}
+    seen_ids: set = set()
+
+    sd = model.state_dict()
+    for name, tensor in sd.items():
+        pid = id(tensor)
+        if pid in seen_ids:
+            meta[name] = "alias"
+            quant[name + ".alias_of"] = [k for k, v in sd.items()
+                                          if id(v) == pid and k != name][0]
+            continue
+        seen_ids.add(pid)
+
+        t = tensor.detach().cpu().float()
+        if not tensor.is_floating_point() or t.numel() < 4096:
+            quant[name] = tensor.detach().cpu().to(torch.float16)
+            meta[name]  = "fp16"
+            continue
+
+        H   = hessians.get(name.replace(".weight", ""))  # key is module path
+        sal = saliency.get(name) if saliency else None
+        if t.ndim == 2 and H is not None:
+            q, s = _gptq_quantize_weight(t, H, saliency=sal)
+            meta[name] = "gptq_int6_sal" if sal is not None else "gptq_int6"
+        else:
+            q, s = _percentile_quantize_weight(t)
+            meta[name] = "pct_int6"
+
+        quant[name + ".q"] = q
+        quant[name + ".s"] = s
+
+    buf = io.BytesIO()
+    torch.save({"quant": quant, "meta": meta, "hp": {
+        "vocab_size": args.vocab_size, "d_model": args.d_model,
+        "n_heads": args.n_heads, "n_layers": args.n_layers,
+        "mlp_ratio": args.mlp_ratio, "seq_len": args.seq_len,
+        "bigram_buckets": args.bigram_buckets, "bigram_dim": args.bigram_dim,
+    }}, buf)
+    raw = buf.getvalue()
+
+    # zstd-22 gives ~5-10% better compression than lzma-9 on int8 GPTQ data.
+    # Try it first; fall back to lzma (stdlib) if zstandard is not installed.
+    try:
+        import zstandard as zstd
+        cctx       = zstd.ZstdCompressor(level=22)
+        compressed = cctx.compress(raw)
+        algo       = "zstd-22"
+    except ImportError:
+        import lzma
+        compressed = lzma.compress(raw, preset=9)
+        algo       = "lzma-9"
+
+    with open(path, "wb") as f:
+        f.write(compressed)
+
+    sal_count = sum(1 for v in meta.values() if v == "gptq_int6_sal")
+    size_mb   = len(compressed) / 1e6
+    log0(f"  [quant] Saved {path}  {size_mb:.2f} MB  [{algo}]  "
+         f"saliency-boosted layers: {sal_count}  "
+         f"({'OK ✓' if size_mb < 16 else 'OVER LIMIT ✗'})  "
+         f"total elapsed {time.time() - t0:.0f}s")
+    return size_mb
+
 
 # ─── Smoke Test ───────────────────────────────────────────────────────────────
 
@@ -618,8 +924,8 @@ def smoke_test():
 
     # Optimizer setup (mirrors train())
     tied     = model.embed.weight
-    muon_p   = [p for p in model.parameters() if p.requires_grad and p.ndim >= 2 and p is not tied]
-    adam_p   = [p for p in model.parameters() if p.requires_grad and (p.ndim < 2 or p is tied)]
+    muon_p   = [p for p in model.parameters() if p.requires_grad and p.ndim == 2 and p is not tied]
+    adam_p   = [p for p in model.parameters() if p.requires_grad and (p.ndim != 2 or p is tied)]
     opt_m    = Muon(muon_p, lr=0.02, wd=0.04)
     opt_a    = torch.optim.AdamW(adam_p, lr=0.02, betas=(0.9, 0.95))
     ema      = EMA(model, 0.997)
