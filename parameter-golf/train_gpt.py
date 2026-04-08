@@ -373,7 +373,8 @@ class DataLoader:
             # Dummy random data for local testing (no fineweb shards available)
             self._buf = torch.randint(0, args.vocab_size, (3_000_000,), dtype=torch.int32)
         else:
-            arr       = np.fromfile(self.files.pop(0), dtype=np.uint16)
+            # Shard format: 256×int32 header (1024 bytes) then uint16 tokens
+            arr       = np.fromfile(self.files.pop(0), dtype="<u2", count=-1, offset=1024)
             self._buf = torch.from_numpy(arr.astype(np.int32))
         self._ptr = 0
 
