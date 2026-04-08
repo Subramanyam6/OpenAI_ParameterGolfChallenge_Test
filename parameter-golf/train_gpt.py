@@ -510,6 +510,8 @@ def train():
         for _ in range(50):
             yield train_ld.next_batch(max(args.batch_tokens // ws, args.seq_len), args.seq_len)
     base.bigram.populate(_bigram_iter(), dev, n_batches=50)
+    if dev.type == 'cuda':
+        torch.cuda.empty_cache()   # return fragmented allocator blocks after populate
 
     # Optimizer split: Muon for 2D weights (excluding tied embedding), AdamW for rest
     tied      = base.embed.weight
