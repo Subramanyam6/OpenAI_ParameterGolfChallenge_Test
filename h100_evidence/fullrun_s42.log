@@ -1,0 +1,108 @@
+nohup: ignoring input
+W0408 08:00:22.569000 4087 torch/distributed/run.py:803] 
+W0408 08:00:22.569000 4087 torch/distributed/run.py:803] *****************************************
+W0408 08:00:22.569000 4087 torch/distributed/run.py:803] Setting OMP_NUM_THREADS environment variable for each process to be 1 in default, to avoid your system being overloaded, please further tune the variable for optimal performance in your application as needed. 
+W0408 08:00:22.569000 4087 torch/distributed/run.py:803] *****************************************
+[74d95d14] device=cuda:0  world_size=8
+Params (deduplicated): 29,765,720  |  FP32: 119.1 MB
+WARNING: model exceeds ~15.8 MB fp32 — check post-GPTQ artifact size.
+Random-baseline BPB: 2.857  |  Competition SOTA ~1.115  |  bytes_per_token=3.5
+Populating BigramSystem ...
+BigramSystem: SVD-initialised (rank 128).
+grad_accum=4  effective_batch=786,432 tokens
+step     0 | loss 11.0770 | lr 0.00000 | 1s
+  ↳ BPB (EMA, stride=64): 4.5858  [random baseline 2.857  target <1.115]
+step    10 | loss 9.8715 | lr 0.00027 | 21s
+step    20 | loss 6.0932 | lr 0.00053 | 27s
+step    30 | loss 5.4815 | lr 0.00080 | 34s
+step    40 | loss 4.7855 | lr 0.00107 | 41s
+step    50 | loss 4.5205 | lr 0.00133 | 47s
+step    60 | loss 4.3620 | lr 0.00160 | 54s
+step    70 | loss 4.1896 | lr 0.00187 | 61s
+step    80 | loss 4.0402 | lr 0.00213 | 67s
+step    90 | loss 3.8558 | lr 0.00240 | 74s
+step   100 | loss 3.7174 | lr 0.00267 | 80s
+  ↳ BPB (EMA, stride=64): 2.3093  [random baseline 2.857  target <1.115]
+step   110 | loss 3.6389 | lr 0.00293 | 93s
+step   120 | loss 3.5034 | lr 0.00320 | 100s
+step   130 | loss 3.3942 | lr 0.00347 | 109s
+step   140 | loss 3.3498 | lr 0.00373 | 116s
+step   150 | loss 3.2920 | lr 0.00400 | 123s
+step   160 | loss 3.1422 | lr 0.00427 | 129s
+step   170 | loss 3.0903 | lr 0.00453 | 136s
+step   180 | loss 3.0119 | lr 0.00480 | 143s
+step   190 | loss 2.9972 | lr 0.00507 | 149s
+step   200 | loss 2.9308 | lr 0.00533 | 156s
+  ↳ BPB (EMA, stride=64): 1.7840  [random baseline 2.857  target <1.115]
+step   210 | loss 2.8684 | lr 0.00560 | 169s
+step   220 | loss 2.7560 | lr 0.00587 | 176s
+step   230 | loss 2.7471 | lr 0.00613 | 183s
+step   240 | loss 2.7951 | lr 0.00640 | 189s
+step   250 | loss 2.7520 | lr 0.00667 | 196s
+step   260 | loss 2.6888 | lr 0.00693 | 206s
+step   270 | loss 2.7808 | lr 0.00720 | 213s
+step   280 | loss 2.6385 | lr 0.00747 | 219s
+step   290 | loss 2.5190 | lr 0.00773 | 226s
+step   300 | loss 2.6037 | lr 0.00800 | 233s
+  ↳ BPB (EMA, stride=64): 1.5325  [random baseline 2.857  target <1.115]
+step   310 | loss 2.7272 | lr 0.00827 | 246s
+step   320 | loss 2.6030 | lr 0.00853 | 253s
+step   330 | loss 2.7592 | lr 0.00880 | 260s
+step   340 | loss 2.5423 | lr 0.00907 | 266s
+step   350 | loss 2.6763 | lr 0.00933 | 273s
+step   360 | loss 2.5440 | lr 0.00960 | 279s
+step   370 | loss 2.5775 | lr 0.00987 | 286s
+step   380 | loss 2.5814 | lr 0.01013 | 297s
+step   390 | loss 2.5170 | lr 0.01040 | 303s
+step   400 | loss 2.6963 | lr 0.01067 | 310s
+  ↳ BPB (EMA, stride=64): 1.2583  [random baseline 2.857  target <1.115]
+step   410 | loss 2.5537 | lr 0.01093 | 324s
+step   420 | loss 2.5154 | lr 0.01120 | 330s
+step   430 | loss 2.4789 | lr 0.01147 | 337s
+step   440 | loss 2.6683 | lr 0.01173 | 343s
+step   450 | loss 2.4646 | lr 0.01200 | 350s
+step   460 | loss 2.4477 | lr 0.01227 | 356s
+step   470 | loss 2.4448 | lr 0.01253 | 363s
+step   480 | loss 2.5137 | lr 0.01280 | 369s
+step   490 | loss 2.4289 | lr 0.01307 | 376s
+step   500 | loss 2.4295 | lr 0.01333 | 382s
+  ↳ BPB (EMA, stride=64): 1.0974  [random baseline 2.857  target <1.115]
+step   510 | loss 2.5231 | lr 0.01360 | 399s
+step   520 | loss 2.4474 | lr 0.01387 | 406s
+step   530 | loss 2.3906 | lr 0.01413 | 412s
+step   540 | loss 2.4315 | lr 0.01440 | 419s
+step   550 | loss 2.5645 | lr 0.01467 | 425s
+step   560 | loss 2.3815 | lr 0.01493 | 432s
+step   570 | loss 2.4057 | lr 0.01520 | 439s
+step   580 | loss 2.3241 | lr 0.01547 | 445s
+step   590 | loss 2.4034 | lr 0.01573 | 452s
+step   600 | loss 2.4120 | lr 0.01600 | 458s
+  ↳ BPB (EMA, stride=64): 1.0299  [random baseline 2.857  target <1.115]
+step   610 | loss 2.4635 | lr 0.01627 | 471s
+step   620 | loss 2.4562 | lr 0.01653 | 481s
+step   630 | loss 2.4129 | lr 0.01680 | 488s
+step   640 | loss 2.3863 | lr 0.01707 | 497s
+step   650 | loss 2.4093 | lr 0.01733 | 504s
+step   660 | loss 2.4332 | lr 0.01760 | 511s
+step   670 | loss 2.3926 | lr 0.01787 | 518s
+step   680 | loss 2.4669 | lr 0.01813 | 524s
+step   690 | loss 2.3441 | lr 0.01840 | 531s
+step   700 | loss 2.2617 | lr 0.01867 | 538s
+  ↳ BPB (EMA, stride=64): 0.9750  [random baseline 2.857  target <1.115]
+step   710 | loss 2.3763 | lr 0.01893 | 551s
+step   720 | loss 2.3882 | lr 0.01920 | 557s
+step   730 | loss 2.3290 | lr 0.01947 | 564s
+step   740 | loss 2.3923 | lr 0.01973 | 571s
+step   750 | loss 2.3806 | lr 0.02000 | 578s
+step   760 | loss 2.2363 | lr 0.02000 | 584s
+step   770 | loss 2.3428 | lr 0.02000 | 594s
+YWall-clock limit reached at step 780.
+Collecting optimizer saliency for GPTQ ...
+  [saliency] collected for 42 parameters.
+/usr/local/lib/python3.12/dist-packages/torch/distributed/distributed_c10d.py:4876: UserWarning: barrier(): using the device under current context. You can specify `device_id` in `init_process_group` to mute this warning.
+  warnings.warn(
+Saving quantized model.bin ...
+  [quant] generating AR calibration sequences ...
+  [quant] collecting Hessians ...
+  [quant] quantizing to int6 (AdamW-v_t saliency boost) ...
+  [quant] SavKd? model.bin  8.88 MB  [zstd-22]  saliency-boosted layers: 6  (OK ✓)  total elapsed 680s

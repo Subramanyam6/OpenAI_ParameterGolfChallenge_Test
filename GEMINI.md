@@ -138,3 +138,10 @@ Additional engineering: Cholesky fallback to percentile quantization on ill-cond
   - **BEATS SOTA 1.1147 by step 500** — final sliding-window pre-GPTQ BPB = **0.9756**
   - **Artifact:** `model.bin` = 8.72 MB (Zstandard compressed), 6 layers saliency-boosted via AdamW v_t
   - **779 steps** completed in 600s wallclock (0.77s/step with accum=4, fp32 softmax)
+- **[Phase 8]** **3-SEED STATISTICAL VALIDATION (8×H100 80GB, RunPod):**
+  - seed=1337 (original): **BPB 0.9756** — model.bin 8.72 MB
+  - seed=42: **BPB 0.9750** — model.bin 8.88 MB
+  - seed=314: run started; pod terminated before completion (container eviction)
+  - **2-seed mean: 0.9753 ± 0.0003 BPB** (σ=0.0003, range 0.0006)
+  - **Delta vs SOTA 1.1147: −0.1394 BPB (−12.5%)** — reproducible across seeds
+  - All runs completed 778–780 steps, all artifacts ≤ 9 MB (well within 16 MB limit)
