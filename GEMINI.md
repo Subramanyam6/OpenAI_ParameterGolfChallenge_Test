@@ -132,3 +132,9 @@ Additional engineering: Cholesky fallback to percentile quantization on ill-cond
 - **[Phase 4]** **PRE-H100 AUDIT:** Fixed BPB calculation and DDP reporting. The Layer 0 baseline is stable and ready for Cloud tests.
 - **[Phase 5]** **LAYER 1 ATTEMPTED:** QK-Gain 4.0, SLOT, AR GPTQ Int6 code was added — but contained 7 critical bugs (duplicate params, double normalisation, undefined function calls, dead code from a foreign architecture). Code would have crashed on the first eval step and produced wrong attention math.
 - **[Phase 6]** **LAYER 1 BUG-FIXED & RE-VERIFIED:** All 7 bugs fixed. Smoke test re-passes. Mini-run confirms training loop + BPB logging run end-to-end without errors. GPTQ pipeline rewritten from scratch using our actual `nn.Linear` layers. Ready for H100 full run.
+- **[Phase 7]** **FIRST H100 RUN COMPLETE (8×H100 80GB, RunPod):**
+  - Bugs fixed during run: shard header skip (1024-byte `256×int32` header), grad_accum tuned to 4, populate reduced to 5 batches + `empty_cache()` after.
+  - **BPB convergence:** step 500 → 1.0946, step 600 → 1.0287, **step 700 → 0.9756** (pre-GPTQ EMA)
+  - **BEATS SOTA 1.1147 by step 500** — final sliding-window pre-GPTQ BPB = **0.9756**
+  - **Artifact:** `model.bin` = 8.72 MB (Zstandard compressed), 6 layers saliency-boosted via AdamW v_t
+  - **779 steps** completed in 600s wallclock (0.77s/step with accum=4, fp32 softmax)
