@@ -127,7 +127,7 @@ class CausalSelfAttention(nn.Module):
         w = (q @ k.transpose(-2, -1)) * (dh ** -0.5)   # [B,H,T,T]
         causal = torch.tril(torch.ones(T, T, device=x.device, dtype=torch.bool))
         w      = w.masked_fill(~causal, float('-inf'))
-        w      = F.softmax(w, dim=-1)   # bf16 softmax: 2x less VRAM, fine for T=1024
+        w      = F.softmax(w.float(), dim=-1).to(x.dtype)   # fp32 softmax for numerical stability
 
         out = w @ v                                          # [B,H,T,dh]
 
@@ -507,9 +507,9 @@ def train():
     # Populate BigramSystem from first 50 training batches via index_add_ (GPU-native)
     log0("Populating BigramSystem ...")
     def _bigram_iter():
-        for _ in range(50):
+        for _ in range(5):
             yield train_ld.next_batch(max(args.batch_tokens // ws, args.seq_len), args.seq_len)
-    base.bigram.populate(_bigram_iter(), dev, n_batches=50)
+    base.bigram.populate(_bigram_iter(), dev, n_batches=5)
     if dev.type == 'cuda':
         torch.cuda.empty_cache()   # return fragmented allocator blocks after populate
 
@@ -521,7 +521,7 @@ def train():
     opt_adam  = torch.optim.AdamW(adam_p, lr=args.adam_lr, betas=(0.9, 0.95), weight_decay=0.0)
 
     ema   = EMA(base, args.ema_decay)
-    accum = max(1, args.batch_tokens // (ws * args.seq_len * 96))
+    accum = max(1, args.batch_tokens // (ws * args.seq_len * 24))
     log0(f"grad_accum={accum}  effective_batch={args.batch_tokens:,} tokens")
 
     t0 = time.time()
