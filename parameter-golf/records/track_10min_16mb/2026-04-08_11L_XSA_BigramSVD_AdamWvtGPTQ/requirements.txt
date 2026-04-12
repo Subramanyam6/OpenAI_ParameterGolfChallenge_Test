@@ -1,0 +1,4 @@
+# PyTorch with CUDA is expected from the official RunPod image; see parameter-golf/README.md
+numpy
+sentencepiece
+zstandard

@@ -1,0 +1,66 @@
+{
+  "author": "Subramanyam6",
+  "github_id": "Subramanyam6",
+  "name": "11L XSA + AdamW v_t Saliency-Weighted GPTQ + SVD BigramSystem",
+  "blurb": "Non-record. Novel AdamW v_t saliency injection into GPTQ Hessian diagonal (optimizer second-moments as quantization guidance, 0 extra artifact bytes) + SVD-initialized BigramSystem. Corrected 3-seed mean BPB: 1.427 (raw logs show 0.975-1.028 due to BYTES_PER_TOKEN=3.5 vs actual ~2.44). Post-GPTQ sliding eval ~1.49 BPB corrected (seed 314). Does not beat SOTA or baseline on BPB; documents techniques plus throughput/logging/post-quant analysis (no FA3, ~700 steps in 600s).",
+  "date": "2026-04-08",
+  "track": "10min_16mb",
+  "record_type": "non_record",
+  "val_bpb": 1.427,
+  "val_bpb_note": "3-seed mean, corrected for bytes_per_token=2.436 (implied by SOTA log pairs). Raw script BPB uses BYTES_PER_TOKEN=3.5 (wrong default).",
+  "val_bpb_std": 0.036,
+  "val_loss": 2.476,
+  "val_loss_note": "Approximate mean CE nats/token across 3 seeds pre-quant (from raw log BPB * ln(2) * 3.5 / seq).",
+  "seeds": [1337, 42, 314],
+  "seed_results": {
+    "1337": {
+      "val_bpb_raw_log": 0.9756,
+      "val_bpb_corrected": 1.4017,
+      "val_bpb_note": "Raw from log @step700; corrected = raw * 3.5 / 2.436",
+      "steps": 779,
+      "step_avg_ms": 857,
+      "artifact_bytes": null,
+      "artifact_note": "model.bin not preserved (pod terminated after GPTQ, 8.72 MB per log)"
+    },
+    "42": {
+      "val_bpb_raw_log": 0.9750,
+      "val_bpb_corrected": 1.4009,
+      "val_bpb_note": "Raw from log @step700; corrected = raw * 3.5 / 2.436",
+      "steps": 780,
+      "step_avg_ms": 857,
+      "artifact_bytes": null,
+      "artifact_note": "model.bin not preserved (pod terminated after GPTQ, 8.88 MB per log)"
+    },
+    "314": {
+      "val_bpb_raw_log": 1.0284,
+      "val_bpb_corrected": 1.4776,
+      "val_bpb_note": "Raw from log @step600 (wall-clock hit at step 698); corrected = raw * 3.5 / 2.436",
+      "val_bpb_post_gptq_corrected": 1.488,
+      "val_bpb_post_gptq_note": "Post-GPTQ sliding-window eval (stride=64, 1M tokens): raw bits/token=3.6251, BPB=3.6251/2.436",
+      "steps": 698,
+      "step_avg_ms": 857,
+      "artifact_bytes": 8154922,
+      "artifact_note": "Submitted model.bin — 8,154,922 bytes, int6+zstd-22"
+    }
+  },
+  "novel_contributions": [
+    "AdamW v_t (exp_avg_sq) injected into GPTQ Hessian diagonal — 0 extra artifact bytes",
+    "SVD-initialized BigramSystem via truncated SVD of log-bigram co-occurrence matrix",
+    "GPU-native BigramSystem accumulation via CUDA index_add_ (no numpy copy bottleneck)"
+  ],
+  "known_issues": [
+    "BYTES_PER_TOKEN hardcoded to 3.5; actual for sp1024 on FineWeb is ~2.436 — all log BPBs inflated by ~1.44x",
+    "No Flash Attention 3: ~700 steps per 600s vs SOTA's ~6900 steps",
+    "fp32 softmax for XSA numerical stability (only needed without FA3)",
+    "grad_accum=4 required for OOM-free 786K batch without FA3 kernel efficiency"
+  ],
+  "hardware": "8xH100 80GB SXM",
+  "pytorch_version": "2.9.1+cu128",
+  "cuda_version": "12.8",
+  "calibration": "AR self-generated, 32 seqs x 1024 tokens, fixed seed",
+  "bytes_per_token_used": 3.5,
+  "bytes_per_token_actual": 2.436,
+  "correction_factor": 1.437,
+  "comparison_sota_bpb": 1.1147,
+  "comparison_baseline_bpb": 1.2244
+}
