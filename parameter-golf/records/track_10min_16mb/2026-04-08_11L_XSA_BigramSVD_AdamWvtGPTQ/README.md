@@ -5,7 +5,7 @@
 **Track:** 10min_16mb
 
 > **Note to OpenAI Reviewers & RunPod Team:**
-> This PR is submitted as an **architectural proof-of-concept** and an explicit pitch for a **$1,000 RunPod Developer Compute Grant**. Our training logs initially reported an unprecedented **0.9756 BPB** at Step 700. However, rigorous mathematical scrutiny reveals this was an illusion caused by a critical metric bug. The true, corrected pre-quantization BPB was **1.402**. 
+> This PR is submitted as an **architectural proof-of-concept** and an explicit pitch for a **$1,000 RunPod Advanced Competitor Grant**. Our training logs initially reported an unprecedented **0.9756 BPB** at Step 700. However, rigorous mathematical scrutiny reveals this was an illusion caused by a critical metric bug. The true, corrected pre-quantization BPB was **1.402**. 
 > 
 > Despite this setback, the architectural innovations within this submission—specifically **Saliency-Boosted GPTQ** and **High-Entropy Routing**—are highly novel. We are requesting the compute grant to resolve our throughput bottlenecks (which starved the model of gradient steps) and build a custom CUDA kernel to stabilize the quantization clamping, clearing our path to the #1 leaderboard spot.
 
@@ -54,9 +54,9 @@ Our baseline geometry actively exploits the 10-minute constraint through two nov
 
 ---
 
-## 4. The Developer Grant Ask & Leaderboard Roadmap
+## 4. The Advanced Competitor Grant Ask & Leaderboard Roadmap
 
-We are formally requesting the **$1,000 RunPod Developer Compute Grant** to resolve our engineering bottlenecks and operationalize this geometry.
+We are formally requesting the **$1,000 RunPod Advanced Competitor Grant** to resolve our engineering bottlenecks and operationalize this geometry.
 
 ### The Roadmap to #1: Flash Attention 3 & Latent-PABU
 
